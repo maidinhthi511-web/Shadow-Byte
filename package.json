@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "@cosmjs/cosmwasm-stargate": "^0.38.1",
+    "@cosmjs/stargate": "^0.39.0",
+    "@keplr-wallet/types": "^0.13.41"
+  }
+}
