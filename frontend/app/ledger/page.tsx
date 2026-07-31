@@ -38,6 +38,19 @@ export default function LedgerPage() {
           </div>
         ))}
       </div>
+      <div className="mt-6">
+        <button
+          className="bg-primary text-primary-foreground px-3 py-1 rounded"
+          onClick={async () => {
+            // seed example blocks for demo
+            await addBlock({ type: 'seed', info: 'Initial demo block', ts: Date.now() })
+            const data = await loadLedger()
+            setBlocks(data)
+          }}
+        >
+          Seed demo block
+        </button>
+      </div>
     </main>
   )
 }
