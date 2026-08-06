@@ -1,13 +1,67 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Bảng lưu thông tin Doanh nghiệp thuê dịch vụ & Nhà cung cấp
+model Organization {
+  id            String        @id @default(uuid())
+  name          String
+  walletAddress String?       @unique // Địa chỉ ví Web3 để ký hợp đồng
+  type          OrgType       @default(CLIENT)
+  createdAt     DateTime      @default(now())
+
+  // Quan hệ (Relation)
+  contractsAsClient   SlaContract[] @relation("ClientContracts")
+  contractsAsProvider SlaContract[] @relation("ProviderContracts")
+}
+
+// Bảng lưu Hợp đồng SLA
+model SlaContract {
+  id              String      @id @default(uuid())
+  title           String
+  status          ContractStatus @default(DRAFT)
+  kpiRules        Json        // Lưu các cấu hình KPI (uptime, response time...)
+  onChainHash     String?     // Lưu "Dấu vân tay" sau khi đẩy lên Injective
+  
+  clientId        String
+  providerId      String
+  client          Organization @relation("ClientContracts", fields: [clientId], references: [id])
+  provider        Organization @relation("ProviderContracts", fields: [providerId], references: [id])
+
+  events          KpiEvent[]
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
+// Bảng Oracle Hub ghi nhận Nhật ký KPI
+model KpiEvent {
+  id              String      @id @default(uuid())
+  contractId      String
+  contract        SlaContract @relation(fields: [contractId], references: [id])
+  
+  kpiCode         String      // VD: "UPTIME", "RESPONSE_TIME"
+  status          EventStatus // ĐẠT hoặc VI PHẠM
+  recordedAt      DateTime    @default(now())
+}
+
+enum OrgType {
+  CLIENT
+  PROVIDER
+}
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  VIOLATED
+  COMPLETED
+}
+
+enum EventStatus {
+  PASSED
+  FAILED
 }
