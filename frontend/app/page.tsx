@@ -8,7 +8,6 @@ import { Badge } from "@/components/ui/badge"
 
 export default function Dashboard() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
-  // State mới: Điều hướng giữa Landing Page, Login, và Register
   const [authView, setAuthView] = useState<"landing" | "login" | "register">("landing")
   
   const [email, setEmail] = useState("")
@@ -21,26 +20,46 @@ export default function Dashboard() {
   const [modalTab, setModalTab] = useState<"details" | "oracle" | "logs">("details")
   const [showNotifications, setShowNotifications] = useState(false)
 
+  // Gọi API lấy dữ liệu thật từ Backend
+  const fetchContracts = async () => {
+    try {
+      const res = await fetch('http://localhost:3000/api/contracts/list');
+      if (res.ok) {
+        const data = await res.json();
+        const formattedData = data.map((c: any) => ({
+          id: c.contractCode,
+          client: c.client?.name || 'Unknown',
+          provider: c.provider?.name || 'Chưa xác định',
+          reputation: c.provider?.reputation ? `${c.provider.reputation}/100` : "-",
+          service: c.serviceName,
+          kpi: `Uptime ${c.uptimeTarget}%`,
+          responseTime: `${c.responseMaxMs}ms`,
+          penalty: c.penaltyRule,
+          status: c.status,
+          txHash: c.txHash || "0x8a7b...4c9f (Chờ đẩy lên Chain)"
+        }));
+        setContracts(formattedData);
+      }
+    } catch (error) {
+      console.error("Lỗi lấy danh sách hợp đồng:", error);
+    }
+  };
+
   useEffect(() => {
     const loggedUser = localStorage.getItem("sla_logged_user")
     if (loggedUser) {
       setIsLoggedIn(true)
       setUsername(loggedUser)
+      fetchContracts()
     }
-
-    const saved = localStorage.getItem("sla_contracts")
-    if (saved) {
-      setContracts(JSON.parse(saved))
-    } else {
-      const mockData = [
-        { id: "SLA-1029", client: "Vietcombank", provider: "FPT Software", reputation: "98/100", service: "Cloud Hosting & Storage", kpi: "Uptime 99.9%", responseTime: "150ms", penalty: "2 INJ / giờ", status: "Active" },
-        { id: "SLA-1028", client: "Techcombank", provider: "Viettel IDC", reputation: "95/100", service: "Cybersecurity Monitoring", kpi: "Uptime 99.95%", responseTime: "200ms", penalty: "5 INJ / giờ", status: "Active" },
-        { id: "SLA-1027", client: "NAB Innovation Center", provider: "VNG Cloud", reputation: "99/100", service: "IT Infrastructure", kpi: "Uptime 99.99%", responseTime: "50ms", penalty: "10 INJ / giờ", status: "Warning" },
-        { id: "SLA-1026", client: "CoverGo", provider: "Amazon Web Services", reputation: "100/100", service: "AWS EC2 & Serverless", kpi: "Uptime 99.99%", responseTime: "100ms", penalty: "Credit 10% bill", status: "Violated" }
-      ]
-      localStorage.setItem("sla_contracts", JSON.stringify(mockData))
-      setContracts(mockData)
-    }
+    
+    // Polling API mỗi 10 giây để thấy Dashboard nhảy số real-time
+    const interval = setInterval(() => {
+      if (localStorage.getItem("sla_logged_user")) {
+        fetchContracts()
+      }
+    }, 10000);
+    return () => clearInterval(interval);
   }, [])
 
   const handleLogin = (e: React.FormEvent) => {
@@ -50,6 +69,7 @@ export default function Dashboard() {
     localStorage.setItem("sla_logged_user", name)
     setUsername(name)
     setIsLoggedIn(true)
+    fetchContracts()
   }
 
   const handleRegister = (e: React.FormEvent) => {
@@ -59,6 +79,7 @@ export default function Dashboard() {
     localStorage.setItem("sla_logged_user", companyName)
     setUsername(companyName)
     setIsLoggedIn(true)
+    fetchContracts()
   }
 
   const handleLogout = () => {
@@ -69,9 +90,14 @@ export default function Dashboard() {
 
   const openContractModal = (contract: any) => { setSelectedContract(contract); setModalTab("details"); }
   const handleExportReport = () => alert("Đang trích xuất dữ liệu từ Injective Chain...\nBáo cáo đối soát KPI định kỳ đã được tải xuống dưới định dạng PDF.")
-  const handleDispute = () => alert(`Hệ thống đã tạo Phiếu xử lý (Ticket #DS-1092) cho hợp đồng ${selectedContract.id}.\nTạm ngưng lệnh phạt tự động trong 24h.`)
+  const handleDispute = () => alert(`Hệ thống đã tạo Phiếu xử lý (Ticket #DS-1092) cho hợp đồng ${selectedContract.id}.\nTạm ngưng lệnh phạt tự động trong 24h để kích hoạt cơ chế trọng tài đối soát dữ liệu.`)
 
-  // VIEW 1: TRƯỚC KHI ĐĂNG NHẬP (Landing / Login / Register)
+  // LOGIC ĐỘNG CHO DASHBOARD
+  const totalContracts = contracts.length;
+  const violatedContracts = contracts.filter(c => c.status === "WARNING" || c.status === "VIOLATED");
+  const warningCount = violatedContracts.length;
+  const kpiRate = totalContracts > 0 ? Math.round(((totalContracts - warningCount) / totalContracts) * 100) : 0;
+
   if (!isLoggedIn) {
     if (authView === "landing") {
       return (
@@ -145,7 +171,6 @@ export default function Dashboard() {
     }
   }
 
-  // VIEW 2: KHI ĐÃ ĐĂNG NHẬP (Giữ nguyên Dashboard xịn sò của mình)
   return (
     <div className="min-h-screen bg-[#f8fafc] flex relative">
       {/* MODAL CHI TIẾT */}
@@ -155,9 +180,9 @@ export default function Dashboard() {
             <div className="flex justify-between items-center border-b border-slate-100 pb-4 mb-4">
               <div>
                 <h3 className="text-xl font-bold text-slate-900">{selectedContract.id}</h3>
-                <p className="text-xs text-slate-500 font-mono mt-1">Hash: 0x8a7b...4c9f (Injective Chain)</p>
+                <p className="text-xs text-slate-500 font-mono mt-1">Hash: {selectedContract.txHash}</p>
               </div>
-              <Badge variant={selectedContract.status === "Active" ? "default" : (selectedContract.status === "Warning" ? "secondary" : "destructive")} className="text-xs px-2.5 py-0.5 rounded-md">
+              <Badge variant={selectedContract.status === "ACTIVE" ? "default" : (selectedContract.status === "WARNING" ? "secondary" : "destructive")} className="text-xs px-2.5 py-0.5 rounded-md">
                 {selectedContract.status}
               </Badge>
             </div>
@@ -174,7 +199,8 @@ export default function Dashboard() {
                   <div className="flex justify-between py-1.5 border-b border-slate-200/60"><span className="text-slate-600 font-medium">Bên thuê (Client):</span><span className="font-semibold text-slate-900">{selectedContract.client}</span></div>
                   <div className="flex justify-between py-1.5 border-b border-slate-200/60"><span className="text-slate-600 font-medium">Nhà cung cấp (Provider):</span><span className="font-semibold text-blue-700">{selectedContract.provider || "Chưa xác định"}</span></div>
                   <div className="flex justify-between py-1.5 border-b border-slate-200/60"><span className="text-slate-600 font-medium">Uptime mục tiêu:</span><span className="font-semibold text-slate-900">{selectedContract.kpi}</span></div>
-                  <div className="flex justify-between py-1.5"><span className="text-slate-600 font-medium">Đền bù vi phạm:</span><span className="font-semibold text-red-600">{selectedContract.penalty || "5 INJ / giờ"}</span></div>
+                  <div className="flex justify-between py-1.5 border-b border-slate-200/60"><span className="text-slate-600 font-medium">Phản hồi tối đa:</span><span className="font-semibold text-slate-900">{selectedContract.responseTime}</span></div>
+                  <div className="flex justify-between py-1.5"><span className="text-slate-600 font-medium">Đền bù vi phạm:</span><span className="font-semibold text-red-600">{selectedContract.penalty}</span></div>
                 </div>
               )}
               {modalTab === "oracle" && (
@@ -196,20 +222,26 @@ export default function Dashboard() {
                 <div className="relative border-l-2 border-slate-200 ml-3 space-y-6 pb-2 mt-2">
                   <div className="relative pl-5">
                     <div className="absolute w-3 h-3 bg-red-500 rounded-full -left-[7px] top-1.5 ring-4 ring-white"></div>
-                    <p className="text-[11px] text-slate-400 font-bold mb-1 uppercase tracking-wider">Vừa xong • Oracle Execution</p>
+                    <p className="text-[11px] text-slate-400 font-bold mb-1 uppercase tracking-wider">Lần quét gần nhất • Oracle Hub</p>
                     <div className="bg-red-50 border border-red-100 p-4 rounded-md shadow-sm">
                       <div className="flex items-start gap-2">
                         <svg className="w-5 h-5 text-red-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
                         <div>
-                          <p className="text-sm font-bold text-red-800">CẢNH BÁO VI PHẠM SLA</p>
+                          <p className="text-sm font-bold text-red-800">
+                            {selectedContract.status === 'VIOLATED' ? 'CẢNH BÁO VI PHẠM SLA' : (selectedContract.status === 'WARNING' ? 'CẢNH BÁO NGUY CƠ RỚT UPTIME' : 'HỆ THỐNG ỔN ĐỊNH')}
+                          </p>
                           <p className="text-xs text-slate-700 mt-1.5 leading-relaxed">
-                            Chỉ số {selectedContract.kpi.split(' ')[0]} thực tế rớt khỏi ngưỡng cam kết. Hợp đồng thông minh đã ghi nhận vi phạm.
+                            {selectedContract.status === 'ACTIVE' 
+                              ? 'Chỉ số hoạt động tốt, đạt ngưỡng cam kết trong hợp đồng thông minh.' 
+                              : `Hệ thống giám sát ghi nhận chỉ số thực tế rớt khỏi ngưỡng cam kết (${selectedContract.kpi}). Hợp đồng thông minh đã ghi nhận sự kiện vi phạm.`}
                           </p>
                         </div>
                       </div>
-                      <button onClick={handleDispute} className="mt-3 h-8 px-3 bg-white border border-red-200 text-red-600 hover:bg-red-50 font-semibold rounded-md transition-colors text-xs flex items-center gap-1.5 shadow-sm">
-                        Tạo phiếu khiếu nại (Dispute)
-                      </button>
+                      {(selectedContract.status === 'VIOLATED' || selectedContract.status === 'WARNING') && (
+                        <button onClick={handleDispute} className="mt-3 h-8 px-3 bg-white border border-red-200 text-red-600 hover:bg-red-50 font-semibold rounded-md transition-colors text-xs flex items-center gap-1.5 shadow-sm">
+                          Tạo phiếu khiếu nại (Dispute)
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -265,14 +297,27 @@ export default function Dashboard() {
             <div className="relative">
               <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 text-slate-500 hover:bg-slate-200 rounded-md transition-colors">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 border border-white rounded-full"></span>
+                {warningCount > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 border border-white rounded-full"></span>}
               </button>
+              
+              {/* RENDER CHUÔNG THÔNG BÁO ĐỘNG */}
               {showNotifications && (
                 <div className="absolute right-0 mt-2 w-72 bg-white rounded-md shadow-lg border border-slate-200 z-50">
-                  <div className="p-3 border-b border-slate-100 font-bold text-sm text-slate-900">Thông báo (1 mới)</div>
-                  <div className="p-3 bg-red-50/50 border-l-2 border-red-500 hover:bg-slate-50 cursor-pointer">
-                    <p className="text-xs font-semibold text-red-700">SLA-1026: Vi phạm Uptime</p>
-                  </div>
+                  <div className="p-3 border-b border-slate-100 font-bold text-sm text-slate-900">Thông báo hệ thống</div>
+                  {warningCount === 0 ? (
+                    <div className="p-3 bg-slate-50 cursor-pointer">
+                      <p className="text-xs text-slate-500 mt-1">Hiện chưa có cảnh báo vi phạm mới nào.</p>
+                    </div>
+                  ) : (
+                    <div className="max-h-60 overflow-y-auto">
+                      {violatedContracts.map(c => (
+                        <div key={c.id} className="p-3 bg-red-50/50 border-l-2 border-red-500 hover:bg-slate-50 cursor-pointer border-b border-slate-100" onClick={() => openContractModal(c)}>
+                          <p className="text-xs font-semibold text-red-700">{c.id}: Cảnh báo SLA</p>
+                          <p className="text-[11px] text-slate-600 mt-1">Dịch vụ của {c.provider} rớt khỏi ngưỡng cam kết.</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -289,19 +334,23 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* THỐNG KÊ */}
+        {/* THỐNG KÊ ĐỘNG */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card className="shadow-sm border-slate-200 rounded-lg bg-white">
             <CardHeader className="pb-2"><CardTitle className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Tổng Hợp Đồng</CardTitle></CardHeader>
-            <CardContent className="text-3xl font-bold text-slate-900">{contracts.length}</CardContent>
+            <CardContent className="text-3xl font-bold text-slate-900">{totalContracts}</CardContent>
           </Card>
           <Card className="shadow-sm border-slate-200 rounded-lg bg-white">
             <CardHeader className="pb-2"><CardTitle className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Tỷ Lệ Đạt KPI</CardTitle></CardHeader>
-            <CardContent className="text-3xl font-bold text-emerald-600">98.5%</CardContent>
+            <CardContent className={`text-3xl font-bold ${kpiRate > 90 ? 'text-emerald-600' : 'text-amber-500'}`}>
+              {kpiRate}%
+            </CardContent>
           </Card>
           <Card className="shadow-sm border-slate-200 rounded-lg bg-white">
             <CardHeader className="pb-2"><CardTitle className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Cảnh Báo (24h)</CardTitle></CardHeader>
-            <CardContent className="text-3xl font-bold text-red-600">1</CardContent>
+            <CardContent className={`text-3xl font-bold ${warningCount > 0 ? 'text-red-600' : 'text-slate-900'}`}>
+              {warningCount}
+            </CardContent>
           </Card>
         </div>
 
@@ -323,20 +372,26 @@ export default function Dashboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {contracts.map((c, i) => (
-                  <TableRow key={i} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => openContractModal(c)}>
-                    <TableCell className="font-semibold text-slate-900 text-sm">{c.id}</TableCell>
-                    <TableCell className="text-slate-700 text-sm">{c.client}</TableCell>
-                    <TableCell className="text-slate-600 text-sm">{c.provider || "Đang chờ ký"}</TableCell>
-                    <TableCell className="text-center">
-                      {c.reputation ? <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-medium text-[11px] rounded border border-emerald-200">{c.reputation}</span> : <span className="text-slate-400 text-sm">-</span>}
-                    </TableCell>
-                    <TableCell className="text-slate-500 text-sm">{c.service}</TableCell>
-                    <TableCell className="text-right">
-                      <Badge variant={c.status === "Active" ? "default" : (c.status === "Warning" ? "secondary" : "destructive")} className="font-medium text-xs rounded-md">{c.status}</Badge>
-                    </TableCell>
+                {contracts.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-8 text-slate-500">Chưa có hợp đồng nào được tạo.</TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  contracts.map((c, i) => (
+                    <TableRow key={i} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => openContractModal(c)}>
+                      <TableCell className="font-semibold text-slate-900 text-sm">{c.id}</TableCell>
+                      <TableCell className="text-slate-700 text-sm">{c.client}</TableCell>
+                      <TableCell className="text-slate-600 text-sm">{c.provider || "Đang chờ ký"}</TableCell>
+                      <TableCell className="text-center">
+                        {c.reputation ? <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-medium text-[11px] rounded border border-emerald-200">{c.reputation}</span> : <span className="text-slate-400 text-sm">-</span>}
+                      </TableCell>
+                      <TableCell className="text-slate-500 text-sm">{c.service}</TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant={c.status === "ACTIVE" ? "default" : (c.status === "WARNING" ? "secondary" : "destructive")} className="font-medium text-xs rounded-md">{c.status}</Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </CardContent>

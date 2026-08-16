@@ -1,34 +1,17 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { Body, Controller, Get, Post } from '@nestjs/common';
 import { SlaContractService } from './sla-contract.service';
-import { CreateSlaContractDto } from './dto/create-sla-contract.dto';
-import { UpdateSlaContractDto } from './dto/update-sla-contract.dto';
 
-@Controller('sla-contract')
+@Controller('api/contracts')
 export class SlaContractController {
   constructor(private readonly slaContractService: SlaContractService) {}
 
-  @Post()
-  create(@Body() createSlaContractDto: CreateSlaContractDto) {
-    return this.slaContractService.create(createSlaContractDto);
+  @Post('create')
+  async create(@Body() createDto: any) {
+    return this.slaContractService.createContract(createDto);
   }
 
-  @Get()
-  findAll() {
-    return this.slaContractService.findAll();
-  }
-
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.slaContractService.findOne(+id);
-  }
-
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateSlaContractDto: UpdateSlaContractDto) {
-    return this.slaContractService.update(+id, updateSlaContractDto);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.slaContractService.remove(+id);
+  @Get('list')
+  async findAll() {
+    return this.slaContractService.getAllContracts();
   }
 }
