@@ -1,8 +1,8 @@
 "use client"
 import { useState } from "react"
 import { addBlock } from "../../lib/ledger"
-import Card from "@/components/ui/card"
-import Input from "@/components/ui/input"
+import { Card } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import Alert from "@/components/ui/alert"
 
 export default function LendingPage() {
