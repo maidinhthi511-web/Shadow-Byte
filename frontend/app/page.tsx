@@ -8,320 +8,390 @@ import { Badge } from "@/components/ui/badge"
 
 export default function Dashboard() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
-  const [authView, setAuthView] = useState<"login" | "register">("login")
+  const [authView, setAuthView] = useState<"landing" | "login" | "register">("landing")
   
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [companyName, setCompanyName] = useState("")
   const [username, setUsername] = useState("")
   const [contracts, setContracts] = useState<any[]>([])
   
-  // State quản lý Modal popup chi tiết hợp đồng
   const [selectedContract, setSelectedContract] = useState<any>(null)
+  const [modalTab, setModalTab] = useState<"details" | "oracle" | "logs">("details")
+  const [showNotifications, setShowNotifications] = useState(false)
+
+  // Gọi API lấy dữ liệu thật từ Backend
+  const fetchContracts = async () => {
+    try {
+      const res = await fetch('http://localhost:3000/api/contracts/list');
+      if (res.ok) {
+        const data = await res.json();
+        const formattedData = data.map((c: any) => ({
+          id: c.contractCode,
+          client: c.client?.name || 'Unknown',
+          provider: c.provider?.name || 'Chưa xác định',
+          reputation: c.provider?.reputation ? `${c.provider.reputation}/100` : "-",
+          service: c.serviceName,
+          kpi: `Uptime ${c.uptimeTarget}%`,
+          responseTime: `${c.responseMaxMs}ms`,
+          penalty: c.penaltyRule,
+          status: c.status,
+          txHash: c.txHash || "0x8a7b...4c9f (Chờ đẩy lên Chain)"
+        }));
+        setContracts(formattedData);
+      }
+    } catch (error) {
+      console.error("Lỗi lấy danh sách hợp đồng:", error);
+    }
+  };
 
   useEffect(() => {
     const loggedUser = localStorage.getItem("sla_logged_user")
     if (loggedUser) {
       setIsLoggedIn(true)
       setUsername(loggedUser)
+      fetchContracts()
     }
-
-    const saved = localStorage.getItem("sla_contracts")
-    if (saved) {
-      setContracts(JSON.parse(saved))
-    } else {
-      const mockData = [
-        { id: "SLA-1024", client: "VNG Corporation", service: "IT Infrastructure", kpi: "Uptime 99.9%", responseTime: "150ms", penalty: "2 INJ / giờ", status: "Active" },
-        { id: "SLA-1025", client: "FPT Software", service: "Cloud Hosting", kpi: "Uptime 99.95%", responseTime: "200ms", penalty: "5 INJ / giờ", status: "Warning" }
-      ]
-      localStorage.setItem("sla_contracts", JSON.stringify(mockData))
-      setContracts(mockData)
-    }
+    
+    // Polling API mỗi 10 giây để thấy Dashboard nhảy số real-time
+    const interval = setInterval(() => {
+      if (localStorage.getItem("sla_logged_user")) {
+        fetchContracts()
+      }
+    }, 10000);
+    return () => clearInterval(interval);
   }, [])
-
-  const handleRegister = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!email || !password || !username) {
-      alert("Vui lòng điền đầy đủ thông tin bắt buộc!")
-      return
-    }
-    const users = JSON.parse(localStorage.getItem("sla_users") || "[]")
-    if (users.some((u: any) => u.email === email)) {
-      alert("Email này đã được đăng ký!")
-      return
-    }
-    users.push({ email, password, username })
-    localStorage.setItem("sla_users", JSON.stringify(users))
-    alert("Đăng ký thành công! Hãy chuyển sang đăng nhập.")
-    setAuthView("login")
-  }
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!email || !password) {
-      alert("Vui lòng nhập đầy đủ Email và Mật khẩu!")
-      return
-    }
-    const users = JSON.parse(localStorage.getItem("sla_users") || "[]")
-    const validUser = users.find((u: any) => u.email === email && u.password === password)
+    if (!email || !password) return alert("Vui lòng nhập đầy đủ!")
+    const name = email.split('@')[0] || "Administrator"
+    localStorage.setItem("sla_logged_user", name)
+    setUsername(name)
+    setIsLoggedIn(true)
+    fetchContracts()
+  }
 
-    if (validUser || (email === "admin@sladex.io" && password === "123456")) {
-      const name = validUser ? validUser.username : "Administrator"
-      localStorage.setItem("sla_logged_user", name)
-      setUsername(name)
-      setIsLoggedIn(true)
-    } else {
-      alert("Sai thông tin đăng nhập hoặc tài khoản không tồn tại!")
-    }
+  const handleRegister = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!companyName || !email || !password) return alert("Vui lòng nhập đầy đủ thông tin tổ chức!")
+    alert("Đăng ký thành công tài khoản tổ chức! Đang khởi tạo không gian làm việc...")
+    localStorage.setItem("sla_logged_user", companyName)
+    setUsername(companyName)
+    setIsLoggedIn(true)
+    fetchContracts()
   }
 
   const handleLogout = () => {
     localStorage.removeItem("sla_logged_user")
     setIsLoggedIn(false)
+    setAuthView("landing")
   }
 
-  // MÀN HÌNH ĐĂNG NHẬP / ĐĂNG KÝ
+  const openContractModal = (contract: any) => { setSelectedContract(contract); setModalTab("details"); }
+  const handleExportReport = () => alert("Đang trích xuất dữ liệu từ Injective Chain...\nBáo cáo đối soát KPI định kỳ đã được tải xuống dưới định dạng PDF.")
+  const handleDispute = () => alert(`Hệ thống đã tạo Phiếu xử lý (Ticket #DS-1092) cho hợp đồng ${selectedContract.id}.\nTạm ngưng lệnh phạt tự động trong 24h để kích hoạt cơ chế trọng tài đối soát dữ liệu.`)
+
+  // LOGIC ĐỘNG CHO DASHBOARD
+  const totalContracts = contracts.length;
+  const violatedContracts = contracts.filter(c => c.status === "WARNING" || c.status === "VIOLATED");
+  const warningCount = violatedContracts.length;
+  const kpiRate = totalContracts > 0 ? Math.round(((totalContracts - warningCount) / totalContracts) * 100) : 0;
+
   if (!isLoggedIn) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-[#f8fafc]">
-        <div className="w-[440px] bg-white p-10 rounded-[2rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.07)] border border-slate-100 flex flex-col items-center">
-          <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center mb-6 shadow-md text-white font-bold text-xl">
-            SD
-          </div>
-
-          <h2 className="text-2xl font-extrabold text-slate-900 mb-1">SLA-DEX System</h2>
-          <p className="text-slate-500 mb-6 text-center text-sm">Cổng quản trị Smart Contract bảo mật</p>
-
-          <div className="flex w-full bg-slate-100 p-1 rounded-xl mb-6">
-            <button 
-              type="button"
-              onClick={() => setAuthView("login")}
-              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${authView === "login" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
-            >
-              Đăng Nhập
-            </button>
-            <button 
-              type="button"
-              onClick={() => setAuthView("register")}
-              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${authView === "register" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
-            >
-              Đăng Ký
-            </button>
-          </div>
-
-          {authView === "login" ? (
-            <form onSubmit={handleLogin} className="w-full space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Email <span className="text-red-500">*</span></label>
-                <input 
-                  type="email" 
-                  placeholder="admin@sladex.io"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900 text-sm bg-slate-50"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Mật khẩu <span className="text-red-500">*</span></label>
-                <input 
-                  type="password" 
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900 text-sm bg-slate-50"
-                />
-              </div>
-              <button
-                type="submit"
-                className="w-full mt-2 py-4 px-6 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-[0_10px_25px_-5px_rgba(15,23,42,0.4)] transition-all active:scale-95"
-              >
-                Xác Thực & Đăng Nhập
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleRegister} className="w-full space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Họ tên <span className="text-red-500">*</span></label>
-                <input 
-                  type="text" 
-                  placeholder="Nguyễn Văn A"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900 text-sm bg-slate-50"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Email <span className="text-red-500">*</span></label>
-                <input 
-                  type="email" 
-                  placeholder="name@company.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900 text-sm bg-slate-50"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Mật khẩu <span className="text-red-500">*</span></label>
-                <input 
-                  type="password" 
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900 text-sm bg-slate-50"
-                />
-              </div>
-              <button
-                type="submit"
-                className="w-full mt-2 py-4 px-6 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-[0_10px_25px_-5px_rgba(15,23,42,0.4)] transition-all active:scale-95"
-              >
-                Đăng Ký Tài Khoản
-              </button>
-            </form>
-          )}
+    if (authView === "landing") {
+      return (
+        <div className="min-h-screen bg-slate-50 flex flex-col">
+          <header className="px-8 py-4 bg-white border-b border-slate-200 flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-blue-600 rounded-md flex items-center justify-center text-white font-bold text-xs">SD</div>
+              <h1 className="font-bold text-slate-900">SLA-DEX</h1>
+            </div>
+            <div className="space-x-4">
+              <button onClick={() => setAuthView("login")} className="text-sm font-semibold text-slate-600 hover:text-slate-900">Đăng Nhập</button>
+              <button onClick={() => setAuthView("register")} className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-md shadow-sm hover:bg-blue-700 transition-colors">Bắt đầu dùng thử</button>
+            </div>
+          </header>
+          <main className="flex-1 flex flex-col items-center justify-center text-center px-4">
+            <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 mb-6">Built on Injective Chain</Badge>
+            <h1 className="text-5xl md:text-6xl font-extrabold text-slate-900 max-w-4xl tracking-tight mb-6">
+              Hạ tầng tin cậy cho giao dịch <span className="text-blue-600">Dịch vụ số</span>
+            </h1>
+            <p className="text-lg text-slate-600 max-w-2xl mb-10 leading-relaxed">
+              Chuẩn hóa KPI, tự động hóa đối soát và xử lý vi phạm bằng Hợp đồng thông minh. Giải quyết dứt điểm rủi ro và tranh chấp trong các giao dịch B2B.
+            </p>
+            <div className="flex gap-4">
+              <button onClick={() => setAuthView("register")} className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-sm hover:bg-blue-700 transition-all transform hover:-translate-y-0.5">Tạo tài khoản Tổ chức miễn phí</button>
+              <button onClick={() => setAuthView("login")} className="px-6 py-3 bg-white border border-slate-300 text-slate-700 font-bold rounded-lg shadow-sm hover:bg-slate-50 transition-all">Khám phá Demo</button>
+            </div>
+          </main>
         </div>
-      </div>
-    )
+      )
+    }
+
+    if (authView === "login" || authView === "register") {
+      return (
+        <div className="flex h-screen items-center justify-center bg-[#f8fafc]">
+          <div className="w-[420px] bg-white p-8 rounded-xl shadow-xl border border-slate-100 flex flex-col items-center relative">
+            <button onClick={() => setAuthView("landing")} className="absolute top-4 left-4 text-slate-400 hover:text-slate-700">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+            </button>
+            <div className="w-12 h-12 bg-blue-600 rounded-md flex items-center justify-center mb-4 shadow-sm text-white font-bold text-lg">SD</div>
+            <h2 className="text-2xl font-bold text-slate-900 mb-1">{authView === "login" ? "Đăng Nhập" : "Đăng Ký Tổ Chức"}</h2>
+            <p className="text-slate-500 mb-6 text-center text-sm">{authView === "login" ? "Cổng quản trị SLA-DEX Enterprise" : "Mở khóa dùng thử miễn phí 30 ngày (Basic Plan)"}</p>
+            
+            <form onSubmit={authView === "login" ? handleLogin : handleRegister} className="w-full space-y-4">
+                {authView === "register" && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Tên Doanh Nghiệp <span className="text-red-500">*</span></label>
+                    <input type="text" placeholder="Công ty CP Công Nghệ..." value={companyName} onChange={(e) => setCompanyName(e.target.value)} className="w-full px-3 py-2 rounded-md border border-slate-300 focus:ring-1 focus:ring-blue-600 text-sm bg-white" />
+                  </div>
+                )}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Email Công Việc <span className="text-red-500">*</span></label>
+                  <input type="email" placeholder="admin@sladex.io" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-3 py-2 rounded-md border border-slate-300 focus:ring-1 focus:ring-blue-600 text-sm bg-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Mật khẩu <span className="text-red-500">*</span></label>
+                  <input type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-3 py-2 rounded-md border border-slate-300 focus:ring-1 focus:ring-blue-600 text-sm bg-white" />
+                </div>
+                <button type="submit" className="w-full mt-2 h-10 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md shadow-sm transition-colors text-sm">
+                  {authView === "login" ? "Xác thực đăng nhập" : "Tạo tài khoản"}
+                </button>
+              </form>
+              <div className="mt-4 text-xs text-slate-500">
+                {authView === "login" ? "Chưa có tài khoản?" : "Đã có tài khoản?"} 
+                <button onClick={() => setAuthView(authView === "login" ? "register" : "login")} className="text-blue-600 font-bold ml-1 hover:underline">
+                  {authView === "login" ? "Đăng ký ngay" : "Đăng nhập"}
+                </button>
+              </div>
+          </div>
+        </div>
+      )
+    }
   }
 
   return (
     <div className="min-h-screen bg-[#f8fafc] flex relative">
-      
-      {/* MODAL HIỂN THỊ THÔNG TIN CHI TIẾT TỪNG HỢP ĐỒNG */}
+      {/* MODAL CHI TIẾT */}
       {selectedContract && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2rem] max-w-lg w-full p-8 shadow-2xl border border-slate-100 space-y-6">
-            <div className="flex justify-between items-center border-b pb-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full p-6 shadow-xl border border-slate-200 flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-4 mb-4">
               <div>
-                <h3 className="text-xl font-extrabold text-slate-900">{selectedContract.id}</h3>
-                <p className="text-xs text-slate-400">Mã hóa trên Injective Blockchain</p>
+                <h3 className="text-xl font-bold text-slate-900">{selectedContract.id}</h3>
+                <p className="text-xs text-slate-500 font-mono mt-1">Hash: {selectedContract.txHash}</p>
               </div>
-              <Badge variant={selectedContract.status === "Active" ? "default" : "destructive"}>{selectedContract.status}</Badge>
+              <Badge variant={selectedContract.status === "ACTIVE" ? "default" : (selectedContract.status === "WARNING" ? "secondary" : "destructive")} className="text-xs px-2.5 py-0.5 rounded-md">
+                {selectedContract.status}
+              </Badge>
+            </div>
+            
+            <div className="flex space-x-6 border-b border-slate-200 mb-4">
+              <button onClick={() => setModalTab("details")} className={`pb-2 text-sm font-medium transition-all ${modalTab === "details" ? "border-b-2 border-blue-600 text-blue-600" : "text-slate-500 hover:text-slate-700"}`}>1. Thông số Ký Kết</button>
+              <button onClick={() => setModalTab("oracle")} className={`pb-2 text-sm font-medium transition-all ${modalTab === "oracle" ? "border-b-2 border-blue-600 text-blue-600" : "text-slate-500 hover:text-slate-700"}`}>2. Cấu hình Oracle</button>
+              <button onClick={() => setModalTab("logs")} className={`pb-2 text-sm font-medium transition-all ${modalTab === "logs" ? "border-b-2 border-blue-600 text-blue-600" : "text-slate-500 hover:text-slate-700"}`}>3. Nhật ký Sự kiện</button>
             </div>
 
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between py-2 border-b border-slate-50">
-                <span className="text-slate-400 font-medium">Bên thuê (Client):</span>
-                <span className="font-bold text-slate-800">{selectedContract.client}</span>
-              </div>
-              <div className="flex justify-between py-2 border-b border-slate-50">
-                <span className="text-slate-400 font-medium">Dịch vụ cam kết:</span>
-                <span className="font-bold text-slate-800">{selectedContract.service}</span>
-              </div>
-              <div className="flex justify-between py-2 border-b border-slate-50">
-                <span className="text-slate-400 font-medium">Uptime mục tiêu:</span>
-                <span className="font-bold text-slate-800">{selectedContract.kpi}</span>
-              </div>
-              <div className="flex justify-between py-2 border-b border-slate-50">
-                <span className="text-slate-400 font-medium">Thời gian phản hồi:</span>
-                <span className="font-bold text-slate-800">{selectedContract.responseTime || "200ms"}</span>
-              </div>
-              <div className="flex justify-between py-2">
-                <span className="text-slate-400 font-medium">Cơ chế đền bù tự động:</span>
-                <span className="font-bold text-red-600">{selectedContract.penalty || "5 INJ / giờ"}</span>
-              </div>
+            <div className="flex-1 overflow-y-auto pr-2">
+              {modalTab === "details" && (
+                <div className="space-y-3 text-sm bg-slate-50 p-5 rounded-md border border-slate-200">
+                  <div className="flex justify-between py-1.5 border-b border-slate-200/60"><span className="text-slate-600 font-medium">Bên thuê (Client):</span><span className="font-semibold text-slate-900">{selectedContract.client}</span></div>
+                  <div className="flex justify-between py-1.5 border-b border-slate-200/60"><span className="text-slate-600 font-medium">Nhà cung cấp (Provider):</span><span className="font-semibold text-blue-700">{selectedContract.provider || "Chưa xác định"}</span></div>
+                  <div className="flex justify-between py-1.5 border-b border-slate-200/60"><span className="text-slate-600 font-medium">Uptime mục tiêu:</span><span className="font-semibold text-slate-900">{selectedContract.kpi}</span></div>
+                  <div className="flex justify-between py-1.5 border-b border-slate-200/60"><span className="text-slate-600 font-medium">Phản hồi tối đa:</span><span className="font-semibold text-slate-900">{selectedContract.responseTime}</span></div>
+                  <div className="flex justify-between py-1.5"><span className="text-slate-600 font-medium">Đền bù vi phạm:</span><span className="font-semibold text-red-600">{selectedContract.penalty}</span></div>
+                </div>
+              )}
+              {modalTab === "oracle" && (
+                <div className="space-y-4">
+                  <div className="bg-blue-50 text-blue-800 p-4 rounded-md text-xs font-medium border border-blue-100 leading-relaxed">
+                    Hệ thống đang kết nối trực tiếp với Endpoint của {selectedContract.provider || "nhà cung cấp"} để Oracle quét dữ liệu KPI.
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Nguồn Dữ Liệu (Data Source)</label>
+                    <select className="w-full px-3 py-2 rounded-md border border-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-600 text-sm bg-white"><option>Datadog API</option><option>AWS CloudWatch Metrics</option><option>Prometheus / Grafana</option></select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Endpoint URL</label>
+                    <input type="text" placeholder="https://api.datadoghq.com/api/v1/query" className="w-full px-3 py-2 rounded-md border border-slate-300 focus:outline-none font-mono text-xs bg-white" />
+                  </div>
+                </div>
+              )}
+              {modalTab === "logs" && (
+                <div className="relative border-l-2 border-slate-200 ml-3 space-y-6 pb-2 mt-2">
+                  <div className="relative pl-5">
+                    <div className="absolute w-3 h-3 bg-red-500 rounded-full -left-[7px] top-1.5 ring-4 ring-white"></div>
+                    <p className="text-[11px] text-slate-400 font-bold mb-1 uppercase tracking-wider">Lần quét gần nhất • Oracle Hub</p>
+                    <div className="bg-red-50 border border-red-100 p-4 rounded-md shadow-sm">
+                      <div className="flex items-start gap-2">
+                        <svg className="w-5 h-5 text-red-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                        <div>
+                          <p className="text-sm font-bold text-red-800">
+                            {selectedContract.status === 'VIOLATED' ? 'CẢNH BÁO VI PHẠM SLA' : (selectedContract.status === 'WARNING' ? 'CẢNH BÁO NGUY CƠ RỚT UPTIME' : 'HỆ THỐNG ỔN ĐỊNH')}
+                          </p>
+                          <p className="text-xs text-slate-700 mt-1.5 leading-relaxed">
+                            {selectedContract.status === 'ACTIVE' 
+                              ? 'Chỉ số hoạt động tốt, đạt ngưỡng cam kết trong hợp đồng thông minh.' 
+                              : `Hệ thống giám sát ghi nhận chỉ số thực tế rớt khỏi ngưỡng cam kết (${selectedContract.kpi}). Hợp đồng thông minh đã ghi nhận sự kiện vi phạm.`}
+                          </p>
+                        </div>
+                      </div>
+                      {(selectedContract.status === 'VIOLATED' || selectedContract.status === 'WARNING') && (
+                        <button onClick={handleDispute} className="mt-3 h-8 px-3 bg-white border border-red-200 text-red-600 hover:bg-red-50 font-semibold rounded-md transition-colors text-xs flex items-center gap-1.5 shadow-sm">
+                          Tạo phiếu khiếu nại (Dispute)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-
-            <button 
-              onClick={() => setSelectedContract(null)}
-              className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition-all"
-            >
-              Đóng Chi Tiết
-            </button>
+            
+            <div className="mt-6 pt-4 border-t border-slate-100 flex justify-end">
+              <button onClick={() => setSelectedContract(null)} className="h-9 px-4 bg-white border border-slate-300 text-slate-700 font-medium rounded-md hover:bg-slate-50 transition-colors text-sm">Đóng cửa sổ</button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* SIDEBAR GÓC TRÁI */}
-      <aside className="w-64 bg-white border-r border-slate-200/80 flex flex-col justify-between hidden md:flex shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
+      {/* SIDEBAR */}
+      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col justify-between hidden md:flex">
         <div>
-          <div className="p-6 border-b border-slate-100 flex items-center gap-3">
-            <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white font-bold shadow-md">
-              SD
-            </div>
+          <div className="p-5 border-b border-slate-200 flex items-center gap-3">
+            <div className="w-8 h-8 bg-blue-600 rounded-md flex items-center justify-center text-white font-bold text-xs shadow-sm">SD</div>
             <div>
-              <h1 className="font-extrabold text-slate-900 leading-tight">SLA-DEX</h1>
-              <p className="text-xs text-slate-400">Xin chào, {username}</p>
+              <h1 className="font-bold text-slate-900 text-sm">SLA-DEX</h1>
+              <p className="text-[11px] text-slate-500 truncate w-32">{username}</p>
             </div>
           </div>
-
-          <nav className="p-4 space-y-1.5">
-            <a href="#" className="flex items-center gap-3 px-4 py-3 rounded-xl bg-slate-900 text-white font-semibold shadow-sm transition-all">
-              Dashboard
-            </a>
-            <Link href="/create-sla" className="flex items-center gap-3 px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-100 font-medium transition-all">
-              Khởi Tạo Hợp Đồng
+          <nav className="p-3 space-y-1">
+            <Link href="/" className="flex items-center gap-3 px-3 py-2 rounded-md bg-slate-100 text-slate-900 font-medium text-sm transition-colors">Dashboard</Link>
+            <Link href="/marketplace" className="flex items-center gap-3 px-3 py-2 rounded-md text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium text-sm transition-colors">Marketplace SLA</Link>
+            <Link href="/create-sla" className="flex items-center gap-3 px-3 py-2 rounded-md text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium text-sm transition-colors">Khởi Tạo Hợp Đồng</Link>
+            <Link href="/pricing" className="flex items-center justify-between px-3 py-2 rounded-md text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium text-sm transition-colors">
+              Gói Dịch Vụ <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded">PRO</span>
             </Link>
-            <Link href="/settings" className="flex items-center gap-3 px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-100 font-medium transition-all">
-              Cài Đặt Tài Khoản
-            </Link>
+            <Link href="/settings" className="flex items-center gap-3 px-3 py-2 rounded-md text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium text-sm transition-colors">Cài Đặt Tài Khoản</Link>
           </nav>
         </div>
-
-        <div className="p-4 border-t border-slate-100">
-          <button 
-            onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 font-medium transition-all text-sm"
-          >
-            Đăng xuất
-          </button>
+        <div className="p-4 border-t border-slate-200">
+          <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 font-medium transition-colors text-sm">Đăng xuất</button>
         </div>
       </aside>
 
-      {/* DASHBOARD CHÍNH */}
-      <main className="flex-1 p-8 space-y-8 overflow-y-auto">
-        <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-[0_10px_30px_-10px_rgba(0,0,0,0.03)] border border-slate-100">
+      {/* MAIN DASHBOARD */}
+      <main className="flex-1 p-8 space-y-6 overflow-y-auto bg-slate-50/50">
+        <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-2xl font-black text-slate-900">Dashboard Quản Trị</h2>
-            <p className="text-slate-500 text-sm">Bấm vào bất kỳ hợp đồng nào bên dưới để xem chi tiết thông số On-Chain.</p>
+            <h2 className="text-xl font-bold text-slate-900">Dashboard Quản Trị</h2>
+            <p className="text-slate-500 text-sm mt-1">Giám sát vòng đời Smart Contract và đối soát dữ liệu Oracle.</p>
           </div>
-          <Link href="/create-sla">
-            <Button className="bg-slate-900 hover:bg-slate-800 text-white font-semibold px-5 py-5 rounded-xl shadow-[0_10px_20px_-5px_rgba(15,23,42,0.3)]">
-              + Khởi Tạo Hợp Đồng
+          
+          <div className="flex gap-4 items-center">
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-md">
+              <span className="text-xs font-semibold text-blue-600">Balance:</span>
+              <span className="text-sm font-bold text-blue-800">1,250 SLAD</span>
+            </div>
+
+            <div className="relative">
+              <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 text-slate-500 hover:bg-slate-200 rounded-md transition-colors">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                {warningCount > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 border border-white rounded-full"></span>}
+              </button>
+              
+              {/* RENDER CHUÔNG THÔNG BÁO ĐỘNG */}
+              {showNotifications && (
+                <div className="absolute right-0 mt-2 w-72 bg-white rounded-md shadow-lg border border-slate-200 z-50">
+                  <div className="p-3 border-b border-slate-100 font-bold text-sm text-slate-900">Thông báo hệ thống</div>
+                  {warningCount === 0 ? (
+                    <div className="p-3 bg-slate-50 cursor-pointer">
+                      <p className="text-xs text-slate-500 mt-1">Hiện chưa có cảnh báo vi phạm mới nào.</p>
+                    </div>
+                  ) : (
+                    <div className="max-h-60 overflow-y-auto">
+                      {violatedContracts.map(c => (
+                        <div key={c.id} className="p-3 bg-red-50/50 border-l-2 border-red-500 hover:bg-slate-50 cursor-pointer border-b border-slate-100" onClick={() => openContractModal(c)}>
+                          <p className="text-xs font-semibold text-red-700">{c.id}: Cảnh báo SLA</p>
+                          <p className="text-[11px] text-slate-600 mt-1">Dịch vụ của {c.provider} rớt khỏi ngưỡng cam kết.</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="w-px h-6 bg-slate-300 mx-1"></div>
+            <Button onClick={handleExportReport} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium px-4 h-9 rounded-md shadow-sm transition-colors text-sm flex items-center gap-2">
+              Xuất Đối Soát
             </Button>
-          </Link>
+            <Link href="/create-sla">
+              <Button className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 h-9 rounded-md shadow-sm transition-colors text-sm flex items-center gap-2">
+                Khởi Tạo Hợp Đồng
+              </Button>
+            </Link>
+          </div>
         </div>
 
+        {/* THỐNG KÊ ĐỘNG */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="shadow-[0_10px_30px_-10px_rgba(0,0,0,0.04)] border-0 rounded-2xl bg-white border-l-4 border-l-slate-900">
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-400 font-bold uppercase tracking-wider">Tổng Hợp Đồng</CardTitle></CardHeader>
-            <CardContent className="text-4xl font-black text-slate-900">{contracts.length}</CardContent>
+          <Card className="shadow-sm border-slate-200 rounded-lg bg-white">
+            <CardHeader className="pb-2"><CardTitle className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Tổng Hợp Đồng</CardTitle></CardHeader>
+            <CardContent className="text-3xl font-bold text-slate-900">{totalContracts}</CardContent>
           </Card>
-          <Card className="shadow-[0_10px_30px_-10px_rgba(0,0,0,0.04)] border-0 rounded-2xl bg-white border-l-4 border-l-emerald-500">
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-400 font-bold uppercase tracking-wider">Tỷ Lệ Đạt KPI</CardTitle></CardHeader>
-            <CardContent className="text-4xl font-black text-emerald-600">98.5%</CardContent>
+          <Card className="shadow-sm border-slate-200 rounded-lg bg-white">
+            <CardHeader className="pb-2"><CardTitle className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Tỷ Lệ Đạt KPI</CardTitle></CardHeader>
+            <CardContent className={`text-3xl font-bold ${kpiRate > 90 ? 'text-emerald-600' : 'text-amber-500'}`}>
+              {kpiRate}%
+            </CardContent>
           </Card>
-          <Card className="shadow-[0_10px_30px_-10px_rgba(0,0,0,0.04)] border-0 rounded-2xl bg-white border-l-4 border-l-rose-500">
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-400 font-bold uppercase tracking-wider">Cảnh Báo (24h)</CardTitle></CardHeader>
-            <CardContent className="text-4xl font-black text-rose-600">1</CardContent>
+          <Card className="shadow-sm border-slate-200 rounded-lg bg-white">
+            <CardHeader className="pb-2"><CardTitle className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Cảnh Báo (24h)</CardTitle></CardHeader>
+            <CardContent className={`text-3xl font-bold ${warningCount > 0 ? 'text-red-600' : 'text-slate-900'}`}>
+              {warningCount}
+            </CardContent>
           </Card>
         </div>
 
-        <Card className="shadow-[0_15px_35px_-10px_rgba(0,0,0,0.05)] border-0 rounded-2xl overflow-hidden bg-white">
-          <CardHeader className="bg-white border-b border-slate-100 p-6">
-            <CardTitle className="text-xl font-bold text-slate-900">Nhật Ký Thực Thi SLA Trực Tuyến</CardTitle>
+        {/* BẢNG */}
+        <Card className="shadow-sm border-slate-200 rounded-lg overflow-hidden bg-white">
+          <CardHeader className="bg-white border-b border-slate-200 p-5">
+            <CardTitle className="text-lg font-bold text-slate-900">Nhật Ký Thực Thi SLA Trực Tuyến</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <Table>
-              <TableHeader className="bg-slate-50/70">
+              <TableHeader className="bg-slate-50/50">
                 <TableRow>
-                  <TableHead className="font-bold text-slate-700">Mã HĐ</TableHead>
-                  <TableHead className="font-bold text-slate-700">Khách Hàng</TableHead>
-                  <TableHead className="font-bold text-slate-700">Dịch Vụ</TableHead>
-                  <TableHead className="font-bold text-slate-700">Cam Kết KPI</TableHead>
-                  <TableHead className="font-bold text-slate-700 text-right">Trạng Thái</TableHead>
+                  <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wider">Mã HĐ</TableHead>
+                  <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wider">Khách Hàng</TableHead>
+                  <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wider">Nhà Cung Cấp</TableHead>
+                  <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wider text-center">Uy Tín</TableHead>
+                  <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wider">Dịch Vụ</TableHead>
+                  <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wider text-right">Trạng Thái</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {contracts.map((c, i) => (
-                  <TableRow key={i} className="cursor-pointer hover:bg-slate-50/80 transition-colors" onClick={() => setSelectedContract(c)}>
-                    <TableCell className="font-bold text-slate-900">{c.id}</TableCell>
-                    <TableCell className="font-semibold text-slate-700">{c.client}</TableCell>
-                    <TableCell className="text-slate-600">{c.service}</TableCell>
-                    <TableCell className="text-slate-500">{c.kpi}</TableCell>
-                    <TableCell className="text-right">
-                      <Badge variant={c.status === "Active" ? "default" : (c.status === "Warning" ? "secondary" : "destructive")}>{c.status}</Badge>
-                    </TableCell>
+                {contracts.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-8 text-slate-500">Chưa có hợp đồng nào được tạo.</TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  contracts.map((c, i) => (
+                    <TableRow key={i} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => openContractModal(c)}>
+                      <TableCell className="font-semibold text-slate-900 text-sm">{c.id}</TableCell>
+                      <TableCell className="text-slate-700 text-sm">{c.client}</TableCell>
+                      <TableCell className="text-slate-600 text-sm">{c.provider || "Đang chờ ký"}</TableCell>
+                      <TableCell className="text-center">
+                        {c.reputation ? <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-medium text-[11px] rounded border border-emerald-200">{c.reputation}</span> : <span className="text-slate-400 text-sm">-</span>}
+                      </TableCell>
+                      <TableCell className="text-slate-500 text-sm">{c.service}</TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant={c.status === "ACTIVE" ? "default" : (c.status === "WARNING" ? "secondary" : "destructive")} className="font-medium text-xs rounded-md">{c.status}</Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </CardContent>

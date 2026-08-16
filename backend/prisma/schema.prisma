@@ -1,67 +1,111 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
-// Bảng lưu thông tin Doanh nghiệp thuê dịch vụ & Nhà cung cấp
+// --- BẢNG DỮ LIỆU CỐT LÕI (MODELS) ---
+
+// 1. Tổ chức / Doanh nghiệp (Bên thuê dịch vụ)
 model Organization {
   id            String        @id @default(uuid())
   name          String
-  walletAddress String?       @unique // Địa chỉ ví Web3 để ký hợp đồng
-  type          OrgType       @default(CLIENT)
+  email         String        @unique
+  walletAddress String?       // Web3 Public Key để ký số
+  balance       Float         @default(0) // Số dư SLAD Token off-chain
   createdAt     DateTime      @default(now())
-
-  // Quan hệ (Relation)
-  contractsAsClient   SlaContract[] @relation("ClientContracts")
-  contractsAsProvider SlaContract[] @relation("ProviderContracts")
+  
+  users         User[]
+  contracts     SlaContract[] @relation("ClientContracts")
 }
 
-// Bảng lưu Hợp đồng SLA
+// 2. Thành viên trong tổ chức (Phân quyền)
+model User {
+  id             String       @id @default(uuid())
+  email          String       @unique
+  passwordHash   String
+  fullName       String
+  role           String       @default("OPERATIONS") // Đã đổi thành String
+  isActive       Boolean      @default(true)
+  organizationId String
+  
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime     @default(now())
+}
+
+// 3. Nhà cung cấp dịch vụ (Marketplace)
+model Provider {
+  id             String        @id @default(uuid())
+  name           String        @unique
+  serviceType    String
+  reputation     Int           @default(100) // Điểm uy tín
+  stakedAmount   Float         @default(0)   // Ký quỹ SLAD
+  isVerified     Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+
+  contracts      SlaContract[] @relation("ProviderContracts")
+}
+
+// 4. Hợp đồng SLA
 model SlaContract {
-  id              String      @id @default(uuid())
-  title           String
-  status          ContractStatus @default(DRAFT)
-  kpiRules        Json        // Lưu các cấu hình KPI (uptime, response time...)
-  onChainHash     String?     // Lưu "Dấu vân tay" sau khi đẩy lên Injective
+  id             String         @id @default(uuid())
+  contractCode   String         @unique // Mã HĐ, VD: SLA-1029
   
-  clientId        String
-  providerId      String
-  client          Organization @relation("ClientContracts", fields: [clientId], references: [id])
-  provider        Organization @relation("ProviderContracts", fields: [providerId], references: [id])
-
-  events          KpiEvent[]
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-}
-
-// Bảng Oracle Hub ghi nhận Nhật ký KPI
-model KpiEvent {
-  id              String      @id @default(uuid())
-  contractId      String
-  contract        SlaContract @relation(fields: [contractId], references: [id])
+  // Relations
+  clientId       String
+  client         Organization   @relation("ClientContracts", fields: [clientId], references: [id])
+  providerId     String
+  provider       Provider       @relation("ProviderContracts", fields: [providerId], references: [id])
   
-  kpiCode         String      // VD: "UPTIME", "RESPONSE_TIME"
-  status          EventStatus // ĐẠT hoặc VI PHẠM
-  recordedAt      DateTime    @default(now())
+  // Điều khoản KPI
+  serviceName    String
+  uptimeTarget   Float          // VD: 99.99
+  responseMaxMs  Int            // Thời gian phản hồi tối đa (ms)
+  penaltyRule    String         // Mô tả luật phạt
+  
+  status         String         @default("ACTIVE") // Đã đổi thành String
+  
+  // Dấu vân tay Web3
+  txHash         String?        // Hash lưu trên Injective khi ký xong
+  
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  oracleConfigs  OracleConfig[]
+  eventLogs      SlaEventLog[]
 }
 
-enum OrgType {
-  CLIENT
-  PROVIDER
+// 5. Cấu hình tích hợp Oracle
+model OracleConfig {
+  id            String       @id @default(uuid())
+  contractId    String
+  contract      SlaContract  @relation(fields: [contractId], references: [id])
+  
+  sourceType    String       // Đã đổi thành String (DATADOG, CLOUDWATCH, CUSTOM_WEBHOOK)
+  endpointUrl   String?
+  apiKeySecret  String?      // Cần mã hóa trước khi lưu
+  isActive      Boolean      @default(true)
 }
 
-enum ContractStatus {
-  DRAFT
-  ACTIVE
-  VIOLATED
-  COMPLETED
-}
+// 6. Nhật ký sự kiện từ Oracle (Logs)
+model SlaEventLog {
+  id            String      @id @default(uuid())
+  contractId    String
+  contract      SlaContract @relation(fields: [contractId], references: [id])
+  
+  kpiCode       String      // VD: "UPTIME_CHECK", "LATENCY_SPIKE"
+  metricValue   Float?      // Giá trị thực tế đo được (VD: 98.5%)
+  isViolation   Boolean     @default(false)
+  description   String?
+  
+  // Dấu vân tay sự kiện trên Injective
+  eventTxHash   String?     
 
-enum EventStatus {
-  PASSED
-  FAILED
+  timestamp     DateTime    @default(now())
 }

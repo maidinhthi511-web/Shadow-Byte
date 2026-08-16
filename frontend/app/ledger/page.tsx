@@ -1,6 +1,7 @@
 "use client"
 import { useEffect, useState } from "react"
-import { loadLedger, Block } from "../../lib/ledger"
+import { addBlock, loadLedger } from "@/lib/ledger"
+import type { Block } from "@/lib/ledger"
 
 export default function LedgerPage() {
   const [blocks, setBlocks] = useState<Block[]>([])
